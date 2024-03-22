@@ -49,7 +49,7 @@ class LeafletMeasurement(tk.Tk):
         self.re_horz_button = tk.Button(self.control_panel, text="Re-Draw Horizontal", command=self.draw_horizontal)
         self.entry = tk.Entry(self.control_panel)
         self.points = []
-
+        
     def open_file(self):
         try:
             self.file = filedialog.askopenfilename(title="Select an image file", filetypes=[("JPG files", "*.jpg")])
@@ -369,13 +369,15 @@ class LeafletMeasurement(tk.Tk):
         df = pd.DataFrame(data)
         df.to_excel(excel_file, index=False)
     '''    
-
+    
+    # Clear the canvas functionality meant for horizontal coordinate system identification
     def end_horizontal(self):
         self.horizontal_line = self.define_line() # Save horizontal line coordinates
         self.horz_flag = True # Mark that horizontal coordinate search was completed
         self.re_horz_button.pack(pady=10) # Allow for updated horizontal line
         self.measure_droop() # Set up for droop measurement
     
+    # Setup for measurment routine to occur on leaflet horizontal droop length
     def measure_droop(self):
         self.accept_points_button.config(text="Accept Measurement and Save", command=self.end_measurement, state=tk.DISABLED)
         self.label.config(text="Select point at the bottom of the leaflet to measure the horizontal drop")
@@ -383,11 +385,6 @@ class LeafletMeasurement(tk.Tk):
         self.canvas.delete("oval") 
         self.points = [] # Reset the points
         self.scale_points() # Draw overlays
-
-    def end_measurement(self):
-        self.distance_to_line()
-        self.save_canvas_to_jpeg()
-        self.open_file()
     
     # Calculate the horizontal distance from a point (x, y) to a line defined by two points (x1, y1) and (x2, y2)
     def distance_to_line(self):
@@ -464,30 +461,42 @@ class LeafletMeasurement(tk.Tk):
         # Save the image to a JPEG file located in the video path
         output_path = file_path + formatted_datetime + "_M.png" # Save to the working directory
         self.image.save(output_path, format="PNG")
+    
+    # Append the leaflet droop measurements to the excel output file
+    def append_row_to_excel(self, file_path, headers, image_lot):
+        try:
+            # Load the Excel file into a DataFrame
+            df = pd.read_excel(file_path)
+            lot, leaflet, _ = image_lot.split("_")
+            data = [[lot, leaflet, self.distance]]
+            df = pd.concat([df, pd.DataFrame(data, columns=headers)], ignore_index=True)
+            
+            # Write the updated DataFrame back to the Excel file
+            df.to_excel(file_path, index=False)
+        except Exception as e:
+            print(f"Error: {e}")
+    
+    # Either identify the file used to save the outputted leaflet droop measurements or create it
+    def find_or_create_file(self, folder_path):
+        file_name = "Leaflet_Droop_Measurements.xlsx"
+        headers = ["Leaflet Assembly Lot #", "Leaflet", "Droop Length (mm)"]
+        file_path = os.path.join(folder_path, file_name)
+        if os.path.exists(file_path): return file_path, headers
+        else:
+            # Create the Excel file with specified headers
+            df = pd.DataFrame(columns=headers)
+            df.to_excel(file_path, index=False)
+        return file_path, headers
 
-    # Save leaflet measurements to an excel file
-    def save_measurement(self):
-        if not self.excel_output:
-            # Get the current date and time
-            current_datetime = datetime.now()
-            formatted_datetime = current_datetime.strftime("_%Y-%m-%d_%H-%M-%S")
-            folder_path, image_file = os.path.splitext(self.file)
-            folder, folder_path = os.path.splitext(folder_path)
-            self.excel_output = folder + formatted_datetime + "_leaflet_measurements.xlsx" # Get the file name without an extension
-        # Save the calibration points selected and the image identifier to the folder
-        data = {'Leaflet: {folder_path}': self.distance}
-        df = pd.DataFrame(data)
-        self.df.append(df)
-        self.df.to_excel(self.excel_output, index=False)
+    # Run saving routine for measurement after point is accepted
+    def end_measurement(self):
+        self.distance_to_line()
+        file_path, ext = os.path.splitext(self.file)
+        folder_path, image_lot = os.path.split(file_path) # Isolate the folder path
+        file_path, headers = self.find_or_create_file(folder_path)
+        self.save_canvas_to_jpeg()
+        self.append_row_to_excel(file_path, headers, image_lot) 
+        self.open_file()
         
-    # Create a function to end the calibration when the user accepts the calibration
-    # Function calls the points_to_value method before destroying the window to save current cal value
-    # to global var gv.calibration_value   
-    def accept_points(self):
-        if self.points_to_value() is not False:
-            self.save_canvas_to_jpeg()
-            #self.save_measurement() 
-            self.open_file()
- 
 app = LeafletMeasurement()
 app.mainloop()
