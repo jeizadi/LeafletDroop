@@ -11,7 +11,7 @@ import pandas as pd
 import tkinter as tk
 from tkinter import filedialog
 from tkinter import messagebox
-from PIL import Image, ImageTk
+from PIL import Image, ImageTk, ImageDraw, ImageFont
 
 class LeafletMeasurement(tk.Tk):
     def __init__(self):    
@@ -41,10 +41,13 @@ class LeafletMeasurement(tk.Tk):
         
         self.cal_flag = False # Track calibration identifier
         self.horz_flag = False # Track horizontal identifer
+
         # Create buttons for functions 
         self.delete_points_button = tk.Button(self.control_panel, text="Delete Point", command=self.delete_point)
         self.accept_points_button = tk.Button(self.control_panel, state=tk.DISABLED)
         self.re_cal_button = tk.Button(self.control_panel, text="Re-Calibrate", command=self.calibration)
+        self.re_horz_button = tk.Button(self.control_panel, text="Re-Draw Horizontal", command=self.draw_horizontal)
+        self.entry = tk.Entry(self.control_panel)
         self.points = []
 
     def open_file(self):
@@ -65,13 +68,13 @@ class LeafletMeasurement(tk.Tk):
                 self.tk_img = ImageTk.PhotoImage(self.image)
                 self.canvas.create_image(self.offset_x, self.offset_y, anchor=tk.CENTER, image=self.tk_img)
                 self.setup_zoom() # set up the zoom function
-                # Run calibration routine if no cal value is found
-                if self.cal_flag: 
-                    self.accept_points_button.config(command=self.end_horizontal)
-                    self.label.config(text="Select points to identify horizontal coordinate system", bg="white", bd=1, relief="solid")
-                    self.accept_points_button.config(text="Accept Horizontal Coordinate System", command=self.end_horizontal)
+                # Decide which routine to initialize
+                if not self.cal_flag:
+                    self.calibration() 
+                elif not self.horz_flag: 
+                    self.draw_horizontal()
                 else:
-                    self.calibration() # Run calibration routine   
+                    self.measure_droop()
                 # Bind a click event to the canvas
                 self.canvas.bind("<Button-1>", self.add_point)
         except FileNotFoundError:
@@ -190,47 +193,69 @@ class LeafletMeasurement(tk.Tk):
         self.accept_points_button.pack_forget()
         self.delete_points_button.pack_forget()
         self.re_cal_button.pack_forget()
+        self.re_horz_button.pack_forget()
         # Reset the calibration flag
         self.cal_flag = False
-        self.horz_flag = False
         # Clear the canvas 
         self.canvas.delete("oval", "overlay") 
         # Create an entry box to take in the value of the feature in mm for calibration
-        self.label.config(text="Enter Calibration Value (mm)", bg=None, relief="flat")
-        self.entry = tk.Entry(self.control_panel)
+        self.label.config(text = "Enter Calibration Value (mm)", bg = None, relief = "flat")
         self.entry.pack(pady=10)
-        
         # Add calibration buttons
         self.delete_points_button.pack(pady=10)
-        self.accept_points_button.config(text="Accept Calibration", command=self.end_calibration)
-        self.accept_points_button.pack(pady=10)     
-        self.points = []
+        self.accept_points_button.config(text = "Accept Calibration", command = self.end_calibration)
+        self.accept_points_button.pack(pady=10)
+        self.points = [] # Reset the points
+        self.scale_points() # Draw overlays
+
+    # Set up for the horizontal line selection routine
+    def draw_horizontal(self):
+        # Reset the control panel
+        self.re_horz_button.pack_forget()
+        self.accept_points_button.config(text="Accept Horizontal", command=self.end_horizontal, state=tk.DISABLED)
+        self.label.config(text="Select points to identify the Horizontal Coordinate System", bg="white", relief="solid")
+        self.horz_flag = False # Reset the horizontal line flag
+        # Clear the canvas 
+        self.canvas.delete("oval", "overlay") 
+        self.points = [] # Reset the points
+        self.scale_points() # Draw overlays
 
     # Select points and add to the calibration_points list
     def add_point(self, event):
         # Add clicked points to the calibration points list
-        if self.horz_flag and len(self.points) == 1: return # Only allow for one point to be selected 
+        if self.cal_flag and self.horz_flag and len(self.points) == 1: return # Only allow for one point to be selected for measurement
         x, y = event.x, event.y
         image_x, image_y = self.convert_to_image(x, y)
         self.canvas.create_oval(x - 3, y - 3, x + 3, y + 3, fill="red", tags="oval")
         self.points.append((image_x, image_y))
+        if len(self.points) >= 2: self.accept_points_button.config(state=tk.NORMAL) # Accept points or lines if 2 or more selected
         if not self.cal_flag or not self.horz_flag: self.draw_fitted_line() # Draw fitted line during calibration
-        if self.horz_flag or len(self.points) >= 2: self.accept_points_button.config(state=tk.NORMAL)
-        if self.horz_flag: self.distance_to_line() # Display the distance 
+        if self.cal_flag and self.horz_flag: 
+            self.accept_points_button.config(state=tk.NORMAL)
+            self.distance_to_line() # Display the distance 
+        self.scale_points()
         
     # Delete the most recently selected point from cal points
     def delete_point(self):
         if self.points: # Check if there are points in the array
             self.points.pop() # Remove the last point from the points list
+            self.scale_points() # Redraw the points to the scale
             # Disable selection if there are not enough points
             if self.horz_flag and len(self.points) < 1: return self.accept_points_button.config(state=tk.DISABLED)
             elif len(self.points) < 2: self.accept_points_button.config(state=tk.DISABLED)
-            self.scale_points() # Redraw the points to the scale
     
     # Scale the points shown on the canvas according to the zoom value
     def scale_points(self):
         # Clear the canvas and redraw the points
         self.canvas.delete("oval", "overlay") 
+        # Draw the applicable lines
+        if self.cal_flag:
+            x1, y1, x2, y2 = self.calibration_line
+            x1, y1 = self.convert_to_canvas(x1, y1)
+            x2, y2 = self.convert_to_canvas(x2, y2)
+            self.canvas.create_line(x1, y1, x2, y2, fill="green", width=2, tags="overlay") # Draw the line
+            text_x, text_y = self.place_text_along_line(x1, y1, x2, y2) # Calculate the xy for text
+            self.canvas.create_text(text_x, text_y, text=(self.entry.get() + " mm"), fill="green", font=self.font, tags="overlay") # Define the length
         if self.horz_flag: 
             x1, y1, x2, y2 = self.horizontal_line
             x1, y1 = self.convert_to_canvas(x1, y1)
@@ -242,6 +267,8 @@ class LeafletMeasurement(tk.Tk):
             # Redraw the points into the current canvas view
             if 0 < canvas_x < self.canvas.winfo_width() and 0 < canvas_y < self.canvas.winfo_height():
                 self.canvas.create_oval(canvas_x - 3, canvas_y - 3, canvas_x + 3, canvas_y + 3, fill="red", tags="oval")
+        if self.cal_flag and self.horz_flag:
+            self.draw_distance()
         if not self.cal_flag or not self.horz_flag: self.draw_fitted_line() # Draw fitted line during calibration
 
     # Fit a line to a list of points using Linear Regression Model and LSR to optimize the line
@@ -276,6 +303,18 @@ class LeafletMeasurement(tk.Tk):
             self.canvas.create_line(x1, y1, x2, y2, fill="red", width=2, tags="overlay") # Draw the line
             text_x, text_y = self.place_text_along_line(x1, y1, x2, y2) # Calculate the xy for text
             if not self.cal_flag: self.canvas.create_text(text_x, text_y, text=(self.entry.get() + " mm"), fill="red", font=self.font, tags="overlay") # Define the length
+        if self.cal_flag: 
+            x1, y1, x2, y2 = self.calibration_line
+            x1, y1 = self.convert_to_canvas(x1, y1)
+            x2, y2 = self.convert_to_canvas(x2, y2)
+            self.canvas.create_line(x1, y1, x2, y2, fill="green", width=2, tags="overlay") # Draw the line
+            text_x, text_y = self.place_text_along_line(x1, y1, x2, y2) # Calculate the xy for text
+            self.canvas.create_text(text_x, text_y, text=(self.entry.get() + " mm"), fill="green", font=self.font, tags="overlay") # Define the length
+        if self.horz_flag: 
+            x1, y1, x2, y2 = self.horizontal_line
+            x1, y1 = self.convert_to_canvas(x1, y1)
+            x2, y2 = self.convert_to_canvas(x2, y2)
+            self.canvas.create_line(x1, y1, x2, y2, fill="green", width=2, tags="overlay") # Draw the line
 
     # Calculate the x and y to place text along a line using the bisecting line as reference
     def place_text_along_line(self, x1, y1, x2, y2, distance=10):
@@ -296,16 +335,16 @@ class LeafletMeasurement(tk.Tk):
     # Run the saving steps for the calibration routine and run point selection next
     def end_calibration(self):
         self.points_to_value()
+        self.calibration_line = self.define_line() # Save line used for calibration
         self.cal_flag = True # Mark that calibration was completed
-        # Reset the canvas for point selection
-        self.accept_points_button.config(text="Accept Horizontal", command=self.end_horizontal, state=tk.DISABLED)
-        self.label.config(text="Select points to identify the Horizontal Coordinate System", bg="white", relief="solid")
         self.re_cal_button.pack(pady=10) # Allow the user to re calibrate if required   
-        self.points = [] # Reset the points
-        if self.cal_flag:
-            self.entry.destroy()
-            # Clear the canvas 
-            self.canvas.delete("oval", "overlay") 
+        self.entry.pack_forget()
+        # Reset the canvas for point selection
+        if self.horz_flag:
+            self.re_horz_button.pack(pady=10)
+            self.measure_droop() # Set up for the measurement process
+        else:
+            self.draw_horizontal() # Set up for the horizontal line selection
             
     # Take in the calibration points and convert to a pixel/mm value
     def points_to_value(self):
@@ -314,32 +353,37 @@ class LeafletMeasurement(tk.Tk):
             x1, y1_line, x2, y2_line = self.define_line()
             distance = math.sqrt((x2-x1)**2 + (y2_line-y1_line)**2)
             self.cal_value = distance / float_value
-            self.save_cal_to_xlsx()
+            #self.save_cal_to_xlsx()
         except (ValueError, TypeError):
             return False
-    
+    '''    
     # Save the calibration file to the folder path
     def save_cal_to_xlsx(self):
         # Get the current date and time
         current_datetime = datetime.now()
         formatted_datetime = current_datetime.strftime("_%Y-%m-%d_%H-%M-%S")
-        folder_path, image_file = os.path.splitext(self.file)
-        excel_file = folder_path + formatted_datetime + "_calPoints.xlsx" # Get the file name without an extension
+        self.folder_path, image_file = os.path.splitext(self.file)
+        excel_file = self.folder_path + formatted_datetime + "_calPoints.xlsx" # Get the file name without an extension
         # Save the calibration points selected and the image identifier to the folder
         data = {'Calibration Points': self.points}
         df = pd.DataFrame(data)
         df.to_excel(excel_file, index=False)
-    
+    '''    
+
     def end_horizontal(self):
-        self.horizontal_line = self.define_line() # Save slope and y int of line
-        self.canvas.delete("oval", "overlay") 
-        self.canvas.create_line(self.horizontal_line, fill="green", width=2, tags="overlay") # Draw the line
+        self.horizontal_line = self.define_line() # Save horizontal line coordinates
         self.horz_flag = True # Mark that horizontal coordinate search was completed
-        # Reset the canvas for point selection
+        self.re_horz_button.pack(pady=10) # Allow for updated horizontal line
+        self.measure_droop() # Set up for droop measurement
+    
+    def measure_droop(self):
         self.accept_points_button.config(text="Accept Measurement and Save", command=self.end_measurement, state=tk.DISABLED)
         self.label.config(text="Select point at the bottom of the leaflet to measure the horizontal drop")
+        # Clear the canvas 
+        self.canvas.delete("oval") 
         self.points = [] # Reset the points
-        
+        self.scale_points() # Draw overlays
+
     def end_measurement(self):
         self.distance_to_line()
         self.save_canvas_to_jpeg()
@@ -355,61 +399,95 @@ class LeafletMeasurement(tk.Tk):
         distance = abs(A*x + B*y + C) / ((A**2 + B**2)**0.5)
         
         # Calculate the coordinates for the line
-        intersection_x = (B*(B*x - A*y) - A*C) / (A**2 + B**2)
-        intersection_y = (A*(-B*x + A*y) - B*C) / (A**2 + B**2)
-
-        # Draw the dashed lines
-        self.extended_line = self.canvas.create_line(intersection_x, intersection_y, x1, y1, fill="red", dash=(4, 4), tags="overlay")
-        self.distance_line = self.canvas.create_line(x, y, intersection_x, intersection_y, fill="red", dash=(4, 4), tags="overlay")
-
+        self.intersection_x = (B*(B*x - A*y) - A*C) / (A**2 + B**2)
+        self.intersection_y = (A*(-B*x + A*y) - B*C) / (A**2 + B**2)
+        
         self.distance = distance / self.cal_value
-        text = f"Distance: {self.distance:.2f}"
+        self.draw_distance()
+        
+    # Draw the intersection to the canvas
+    def draw_distance(self):
+        x, y = self.points[0]
+        x, y = self.convert_to_canvas(x, y)
+        x1, y1, x2, y2 = self.horizontal_line
+        x1, y1 = self.convert_to_canvas(x1, y1)
+        x2, y2 = self.convert_to_canvas(x2, y2)
+        canvas_x, canvas_y = self.convert_to_canvas(self.intersection_x, self.intersection_y)
+        # Draw the dashed lines
+        self.extended_line = self.canvas.create_line(canvas_x, canvas_y, x1, y1, fill="red", dash=(4, 4), tags="overlay")
+        self.distance_line = self.canvas.create_line(x, y, canvas_x, canvas_y, fill="red", dash=(4, 4), tags="overlay")
         # Assuming canvas is your Tkinter Canvas object
-        self.canvas.create_text(10, 10, anchor="nw", text=text, tags="overlay")
-'''
+        self.canvas.create_text(10, 10, anchor="nw", text=f"Distance: {self.distance:.2f}", fill="red", font=self.font, tags="overlay")
+
     def save_canvas_to_jpeg(self):
+        # Convert the image to RGB mode
+        if self.image.mode != 'RGB':
+            self.image = self.image.convert('RGB')
         draw = ImageDraw.Draw(self.image)
-        
-        # Add an image label to the output image
-        text=gv.video_file_name
-        font=ImageFont.truetype("arial.ttf", size=20)
-        bbox = draw.textbbox((10,10), text, font=font)
-        draw.rectangle(bbox, fill="white")
-        draw.text((10,10), text, font=font, fill="black")
-        
-        # Add the overlays to the image depending on which calibration scheme was used
-        if self.calibration_scheme.get() == self.cal_ring:
-            cx, cy, r = self.fit_circle()
-            draw.ellipse((cx-r, cy-r, cx+r, cy+r), outline="blue", width=4) #  Add the circle fit to the image
-            text_x, text_y = self.place_text_along_line(cx-r, cy, cx+r, cy, distance=24) # Calculate the coordinates for the text
-            draw.line((cx-r, cy, cx+r, cy), fill="red", width=2) # Create a radial line
-            draw.text((text_x, text_y), text=(self.entry.get()+"mm"), font=font, fill="red") # Add the diameter to the line
-        else:
-            x1, x2, y1, y2 = self.define_line()
-            draw.line((x1, y1, x2, y2), fill="red", width=4)
-            text_x, text_y = self.place_text_along_line(x1, y1, x2, y2, distance=24) # Calculate the coordinates for the text
-            draw.text((text_x, text_y), text=(self.entry.get()+"mm"), font=font, fill="red")
         
         # Get the current date and time
         current_datetime = datetime.now()
-        formatted_datetime = current_datetime.strftime("%Y-%m-%d_%H-%M-%S")
+        formatted_datetime = current_datetime.strftime("_%Y-%m-%d_%H-%M-%S")
+        file_path, ext = os.path.splitext(self.file)
+        folder_path, image_lot = os.path.split(file_path) # Isolate the folder and the image lot identifier
+    
+        # Add an image label to the output image
+        font=ImageFont.truetype("arial.ttf", size=16)
+        bbox = draw.textbbox((10,10), image_lot, font=font)
+        draw.rectangle((bbox[0] - 2, bbox[1] - 2, bbox[2] + 2, bbox[3] + 2), fill="white", outline="black", width=1)
+        draw.text((10,10), image_lot, font=font, fill="black")
+    
+        # Draw the calibration line and calibration value
+        x1, y1, x2, y2 = self.calibration_line
+        draw.line((x1, y1, x2, y2), fill="green", width=3) 
+        text_x, text_y = self.place_text_along_line(x1, y1, x2, y2, distance=24)
+        bbox = draw.textbbox((text_x, text_y), text=(self.entry.get() + " mm"), font=font)
+        draw.rectangle((bbox[0] - 2, bbox[1] - 2, bbox[2] + 2, bbox[3] + 2), fill="white", outline="black", width=1)
+        draw.text((text_x, text_y), text=(self.entry.get() + " mm"), font=font, fill="green") 
         
-        file_name_without_extension = os.path.splitext(gv.video_file_name)[0] # Get the file name without an extension
-        folder_name = file_name_without_extension + "_" + formatted_datetime
-        gv.output_folder_path = os.path.join(gv.video_directory, folder_name)
-        os.makedirs(gv.output_folder_path)
-
+        # Draw the horizontal line
+        x1, y1, x2, y2 = self.horizontal_line
+        draw.line((x1, y1, x2, y2), fill="green", width=3) 
+        # Draw the selected point and corresponding distance lines
+        x, y = self.points[0]
+        draw.line((self.intersection_x, self.intersection_y, x1, y1), fill="blue", width=3)
+        draw.line((x, y, self.intersection_x, self.intersection_y), fill="blue", width=3)
+        draw.ellipse((x - 2, y - 2, x + 2, y + 2), fill="red")
+        text_x, text_y = self.place_text_along_line(x, y, self.intersection_x, self.intersection_y) # Calculate the xy for text
+        bbox = draw.textbbox((text_x-70, text_y-20), text=f"{self.distance:.2f} mm", font=font)
+        draw.rectangle((bbox[0] - 2, bbox[1] - 2, bbox[2] + 2, bbox[3] + 2), fill="white", outline="black", width=1)
+        draw.text((text_x-70, text_y-20), text=f"{self.distance:.2f} mm", font=font, fill="red")
+        bbox = draw.textbbox((10, 40), text=f"Horizontal Droop (mm): {self.distance:.2f}", font=font)
+        draw.rectangle((bbox[0] - 2, bbox[1] - 2, bbox[2] + 2, bbox[3] + 2), fill="white", outline="black", width=1)
+        draw.text((10, 40), text=f"Horizontal Droop (mm): {self.distance:.2f}", font=font, fill="red")
+    
         # Save the image to a JPEG file located in the video path
-        output_path = os.path.join(gv.output_folder_path, "Calibration.png") # Save to the working directory
+        output_path = file_path + formatted_datetime + "_M.png" # Save to the working directory
         self.image.save(output_path, format="PNG")
-        '''
+
+    # Save leaflet measurements to an excel file
+    def save_measurement(self):
+        if not self.excel_output:
+            # Get the current date and time
+            current_datetime = datetime.now()
+            formatted_datetime = current_datetime.strftime("_%Y-%m-%d_%H-%M-%S")
+            folder_path, image_file = os.path.splitext(self.file)
+            folder, folder_path = os.path.splitext(folder_path)
+            self.excel_output = folder + formatted_datetime + "_leaflet_measurements.xlsx" # Get the file name without an extension
+        # Save the calibration points selected and the image identifier to the folder
+        data = {'Leaflet: {folder_path}': self.distance}
+        df = pd.DataFrame(data)
+        self.df.append(df)
+        self.df.to_excel(self.excel_output, index=False)
+        
     # Create a function to end the calibration when the user accepts the calibration
     # Function calls the points_to_value method before destroying the window to save current cal value
     # to global var gv.calibration_value   
     def accept_points(self):
         if self.points_to_value() is not False:
             self.save_canvas_to_jpeg()
-            self.destroy()
-
+            #self.save_measurement() 
+            self.open_file()
+ 
 app = LeafletMeasurement()
 app.mainloop()
