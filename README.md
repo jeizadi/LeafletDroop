@@ -25,5 +25,10 @@ After both the calibration and horizontal coordinate system have been initialize
 Once satisfied with the point selection, select the "Accept and Save" button to save the output image and write the distance value and leaflet lot identifiers to the (existing) output Excel file in the file location of the original input image. 
 
 # Outputs
-1. Output image (.PNG) named according to the input image, current date & time, and marked with a "_M" and contains the original image with the calibration scale (green), horizontal coordinate system (green), distance measurements (blue), and point (red) along with an identifer and output in the upper left corner
+1. Output image (.PNG) named according to the input image, current date & time, and marked with a "_M" and contains the original image with the calibration scale (green), horizontal coordinate system (green), distance measurements (blue), and point (red) along with an identifier and output in the upper left corner
 2. Excel file appended with the leaflet lot identifiers and droop length: "Leaflet Assembly Lot #", "Leaflet", "Droop Length (mm)"
+
+# Notes
+The calibration scale and horizontal coordinate system will carry over when opening a new image file to facilitate ease of measurement given the fixed set-up. These can be overridden by selecting either the "Re-Calibration" or "Re-Draw Horizontal" buttons at any time. 
+
+Zoom Functionality: Hold the left Control Key down (Ctrl-L) and scroll up on a mouse wheel to zoom into the region located at the mouse position on the image -OR- hold the left Control Key down (Ctrl-L) and scroll down on a mouse wheel to zoom out. 
