@@ -1,4 +1,4 @@
-# material-characterization
+# material-droop-characterization
 The material characterization program accepts all .JPEG files and allows for user identification of scale and horizontal coordinate system of interest to generate output files from a single selected point measuring the distance perpendicular to the horizontal coordinate system to the point of interest and appends the distance value to an excel output file.
 
 ## Input File Format
