@@ -17,6 +17,23 @@ from PIL import Image, ImageTk, ImageDraw, ImageFont
 class MaterialMeasurement(tk.Tk):
     def __init__(self):
         super().__init__()
+        self.tk_image = None
+        self.tk_img = None
+        self.image_y = None
+        self.image_x = None
+        self.offset_y = None
+        self.offset_x = None
+        self.canvas = None
+        self.image = None
+        self.image_lot = None
+        self.folder_path = None
+        self.file_path = None
+        self.image_label = None
+        self.file = None
+        self.image_height = None
+        self.image_width = None
+        self.zoom_mode = None
+        self.zoom_factor = 1.0
         self.title("Measurement Window")
         # Calculate a reasonable size and position for the window
         screen_width = self.winfo_screenwidth()
@@ -93,7 +110,6 @@ class MaterialMeasurement(tk.Tk):
         self.bind_all("<KeyPress-Control_L>", self.start_zoom)
         self.bind_all("<KeyRelease-Control_L>", self.reset_cursor)
         self.canvas.bind("<MouseWheel>", self.zoom)
-        self.zoom_factor = 1.0
         self.zoom_mode = False
 
     def resize_image(self):
@@ -101,16 +117,16 @@ class MaterialMeasurement(tk.Tk):
         self.image.thumbnail(target_size, Image.Resampling.LANCZOS)
         self.image_width, self.image_height = self.image.size
 
-    # Start the zoom event casade 
+    # Start the zoom event cascade 
     def start_zoom(self, event):
         self.zoom_mode = True
         self.canvas.config(cursor="plus")
 
     # Zoom in or out depending on the scroll direction
     def zoom(self, event):
-        if (event.delta > 0):
+        if event.delta > 0:
             self.zoom_in(event.x, event.y)
-        elif (event.delta < 0):
+        elif event.delta < 0:
             self.zoom_out(event.x, event.y)
 
     # End the zoom event and restart point selection
@@ -179,7 +195,7 @@ class MaterialMeasurement(tk.Tk):
         self.offset_x = self.offset_x * (width / self.image_width)
         self.offset_y = self.offset_y * (height / self.image_height)
         self.image_width, self.image_height = width, height
-        self.image = self.image.resize((width, height), Image.ANTIALIAS)
+        self.image = self.image.resize((width, height), Image.LANCZOS)
         self.tk_img = ImageTk.PhotoImage(self.image)
         self.canvas.delete("all")
         self.canvas.create_image(self.offset_x, self.offset_y, anchor=tk.CENTER, image=self.tk_img)
@@ -208,7 +224,7 @@ class MaterialMeasurement(tk.Tk):
         # Clear the canvas 
         self.canvas.delete("oval", "overlay")
         # Create an entry box to take in the value of the feature in mm for calibration
-        self.label.config(text="Enter Calibration Value (mm)", bg=None, relief="flat")
+        self.label.config(text="Enter Calibration Value (mm)", relief="flat")
         self.entry.pack(pady=10)
         # Add calibration buttons
         self.delete_points_button.pack(pady=10)
@@ -232,8 +248,8 @@ class MaterialMeasurement(tk.Tk):
     # Select points and add to the calibration_points list
     def add_point(self, event):
         # Add clicked points to the calibration points list
-        if self.cal_flag and self.horz_flag and len(
-            self.points) == 1: return  # Only allow for one point to be selected for measurement
+        if self.cal_flag and self.horz_flag and len(self.points) == 1:
+            return  # Only allow for one point to be selected for measurement
         x, y = event.x, event.y
         image_x, image_y = self.convert_to_image(x, y)
         self.canvas.create_oval(x - 3, y - 3, x + 3, y + 3, fill="red", tags="oval")
